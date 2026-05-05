@@ -1,0 +1,26 @@
+[package]
+name = "blc-vfs"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "blc-vfs-cli"
+path = "src/Binaries/cli.rs"
+
+[[bin]]
+name = "blc-vfs-gui"
+path = "src/Binaries/gui.rs"
+
+[dependencies]
+chacha20 = "0.9"
+base64 = "0.22"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+memmap2 = "0.9"
+walkdir = "2.5"
+md-5 = "0.10"
+byteorder = "1.5"
+
+eframe = "0.29"
+egui = "0.29"
+rfd = "0.15"
