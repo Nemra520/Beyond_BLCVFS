@@ -37,6 +37,7 @@ fn handle_command(parts: Vec<&str>, vfs: &mut Option<MultiVFS>, current_dir: &mu
         "cd" => cmd_cd(parts, vfs, current_dir),
         "pwd" => cmd_pwd(vfs, current_dir),
         "extract" => cmd_extract(parts, vfs, current_dir),
+        "extract-dir" => cmd_extract_dir(parts, vfs, current_dir),
         "extract-all" => cmd_extract_all(parts, vfs, current_dir),
         "packages" => cmd_packages(vfs),
         "help" => print_help(),
@@ -158,7 +159,7 @@ fn cmd_extract(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &String) {
         println!("Usage: extract <file>");
         return;
     }
-    
+
     match vfs {
         Some(mounted_vfs) => {
             let file_path = if parts[1].starts_with('/') {
@@ -166,18 +167,90 @@ fn cmd_extract(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &String) {
             } else {
                 join_paths(current_dir, parts[1])
             };
-            
+
             if !is_file(mounted_vfs, &file_path) {
                 println!("✗ File not found: {}", file_path);
                 return;
             }
-            
+
             let output_dir = PathBuf::from("output");
-            
+
             match extract_file(mounted_vfs, &file_path, &output_dir) {
                 Ok(()) => println!("✓ File saved to: output/{}", file_path),
                 Err(e) => println!("✗ Extract failed: {}", e),
             }
+        }
+        None => {
+            println!("✗ Please mount a folder first");
+        }
+    }
+}
+
+fn cmd_extract_dir(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &String) {
+    match vfs {
+        Some(mounted_vfs) => {
+            // If no directory specified, use current directory
+            let target_dir = if parts.len() < 2 {
+                current_dir.clone()
+            } else if parts[1].starts_with('/') {
+                parts[1][1..].to_string()
+            } else {
+                join_paths(current_dir, parts[1])
+            };
+
+            let output_dir = if parts.len() > 2 {
+                PathBuf::from(parts[2])
+            } else {
+                PathBuf::from("output")
+            };
+
+            println!("Extracting directory: /{}", target_dir);
+
+            let all_files = mounted_vfs.list_all_files();
+            let dir_prefix = format!("{}/", target_dir.trim_matches('/'));
+
+            let files_to_extract: Vec<_> = all_files
+                .iter()
+                .filter(|f| {
+                    if target_dir.is_empty() {
+                        // Root directory: all files
+                        true
+                    } else {
+                        f.starts_with(&dir_prefix)
+                    }
+                })
+                .collect();
+
+            let total = files_to_extract.len();
+
+            if total == 0 {
+                println!("No files found in directory: /{}", target_dir);
+                return;
+            }
+
+            println!("Found {} files to extract", total);
+
+            let mut success = 0;
+            let mut failed = 0;
+
+            for (i, file_path) in files_to_extract.iter().enumerate() {
+                match extract_file(mounted_vfs, file_path, &output_dir) {
+                    Ok(()) => success += 1,
+                    Err(e) => {
+                        println!("✗ Failed to extract {}: {}", file_path, e);
+                        failed += 1;
+                    }
+                }
+
+                if (i + 1) % 100 == 0 {
+                    println!("Progress: {}/{}", i + 1, total);
+                }
+            }
+
+            println!("\nExtraction complete!");
+            println!("  Success: {}", success);
+            println!("  Failed: {}", failed);
+            println!("  Output: {}/{}", output_dir.display(), target_dir);
         }
         None => {
             println!("✗ Please mount a folder first");
@@ -277,7 +350,8 @@ fn print_help() {
     println!("  cd <path>                      - Change directory");
     println!("  pwd                            - Print working directory");
     println!("  extract <file>                 - Extract single file");
-    println!("  extract-all [output_dir]       - Extract all files in current directory");
+    println!("  extract-dir <dir> [output]     - Extract all files in a directory");
+    println!("  extract-all [output_dir]       - Extract all files");
     println!("  packages                       - List all mounted packages");
     println!("  help                           - Show this help");
     println!("  quit / exit                    - Exit program");

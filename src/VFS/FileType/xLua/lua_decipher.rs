@@ -22,12 +22,23 @@ impl LuaDecipher {
         
         let encrypted_bytes = if Self::is_base64(encrypted_data) {
             use base64::{Engine as _, engine::general_purpose};
-            general_purpose::STANDARD.decode(encrypted_data).ok()?
+            let cleaned: Vec<u8> = encrypted_data
+                .iter()
+                .filter(|&&b| b != b'\n' && b != b'\r')
+                .copied()
+                .collect();
+            general_purpose::STANDARD.decode(&cleaned).ok()?
         } else {
             encrypted_data.to_vec()
         };
         
-        Xxtea::decrypt(&encrypted_bytes, master_key.as_bytes())
+        let decrypted = Xxtea::decrypt(&encrypted_bytes, master_key.as_bytes())?;
+        
+        if !Self::is_valid_lua_bytecode(&decrypted) && Self::is_likely_encrypted(&decrypted) {
+            eprintln!("Warning: Decrypted data does not match Lua format and has high entropy (may still be encrypted)");
+        }
+        
+        Some(decrypted)
     }
     
     pub fn decrypt_with_key(encrypted_data: &[u8], key: &str) -> Option<Vec<u8>> {
@@ -37,12 +48,23 @@ impl LuaDecipher {
         
         let encrypted_bytes = if Self::is_base64(encrypted_data) {
             use base64::{Engine as _, engine::general_purpose};
-            general_purpose::STANDARD.decode(encrypted_data).ok()?
+            let cleaned: Vec<u8> = encrypted_data
+                .iter()
+                .filter(|&&b| b != b'\n' && b != b'\r')
+                .copied()
+                .collect();
+            general_purpose::STANDARD.decode(&cleaned).ok()?
         } else {
             encrypted_data.to_vec()
         };
         
-        Xxtea::decrypt(&encrypted_bytes, key.as_bytes())
+        let decrypted = Xxtea::decrypt(&encrypted_bytes, key.as_bytes())?;
+        
+        if !Self::is_valid_lua_bytecode(&decrypted) && Self::is_likely_encrypted(&decrypted) {
+            eprintln!("Warning: Decrypted data does not match Lua format and has high entropy (may still be encrypted)");
+        }
+        
+        Some(decrypted)
     }
     
     fn is_base64(data: &[u8]) -> bool {
@@ -109,8 +131,8 @@ impl LuaDecipher {
             return true;
         }
         
-        if let Ok(text) = std::str::from_utf8(&data[..data.len().min(1000)]) {
-            let text = text.trim_start_matches(|c| c == '\u{FEFF}' || c == '\r' || c == '\n' || c == ' ' || c == '\t');
+        if let Ok(text) = std::str::from_utf8(&data[..data.len().min(2000)]) {
+            let text = text.trim_start_matches(|c: char| c == '\u{FEFF}' || c == '\r' || c == '\n' || c == ' ' || c == '\t');
             
             return text.starts_with("local ")
                 || text.starts_with("function ")
@@ -118,10 +140,52 @@ impl LuaDecipher {
                 || text.starts_with("require ")
                 || text.starts_with("--")
                 || text.starts_with("config ")
+                || text.contains("= HL.Class(")
+                || text.contains("= Class(")
+                || text.contains("= {")
+                || text.contains("= {")
                 || text.contains("local ")
-                || text.contains("function(");
+                || text.contains("function(")
+                || text.contains("function ")
+                || text.contains("MessageConst.")
+                || text.contains("HL.")
+                || text.contains("UIConst.")
+                || text.contains("GameInstance.");
         }
         
         false
+    }
+    
+    pub fn calculate_entropy(data: &[u8]) -> f64 {
+        if data.is_empty() {
+            return 0.0;
+        }
+        
+        let mut frequency = [0u64; 256];
+        for &byte in data {
+            frequency[byte as usize] += 1;
+        }
+        
+        let len = data.len() as f64;
+        let mut entropy = 0.0;
+        
+        for &count in &frequency {
+            if count > 0 {
+                let probability = count as f64 / len;
+                entropy -= probability * probability.log2();
+            }
+        }
+        
+        entropy
+    }
+    
+    pub fn is_likely_encrypted(data: &[u8]) -> bool {
+        if data.len() < 100 {
+            return false;
+        }
+        
+        let entropy = Self::calculate_entropy(data);
+        
+        entropy > 7.5
     }
 }
