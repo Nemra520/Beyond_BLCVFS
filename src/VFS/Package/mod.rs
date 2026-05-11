@@ -1,5 +1,5 @@
 use crate::VFS::BLC::{BlcMainInfo, FileInfo, BlcParser, Decryptor, BlcError, Result};
-use crate::VFS::FileType::LuaDecipher;
+use crate::VFS::FileType::{LuaDecipher, PckExtractor};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use memmap2::Mmap;
@@ -138,6 +138,28 @@ impl Package {
     
     pub fn get_file_count(&self) -> usize {
         self.file_index.len()
+    }
+
+    pub fn read_pck_file(&self, path: &str) -> Result<Vec<u8>> {
+        let data = self.read_file(path)?;
+        PckExtractor::get_decrypted_pck(&data)
+    }
+
+    pub fn list_pck_files(&self) -> Vec<&str> {
+        self.file_index
+            .keys()
+            .filter(|k| k.to_lowercase().ends_with(".pck"))
+            .map(|s| s.as_str())
+            .collect()
+    }
+
+    pub fn extract_pck_to_dir(&self, path: &str, output_dir: &Path) -> Result<Vec<PathBuf>> {
+        let data = self.read_file(path)?;
+        let file_name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output.pck");
+        PckExtractor::extract_to_dir(&data, output_dir, Some(file_name))
     }
 }
 

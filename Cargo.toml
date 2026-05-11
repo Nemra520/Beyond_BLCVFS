@@ -9,7 +9,7 @@ path = "src/Binaries/cli.rs"
 
 [[bin]]
 name = "blc-vfs-gui"
-path = "src/Binaries/gui.rs"
+path = "src/Binaries/gui_main.rs"
 
 [dependencies]
 chacha20 = "0.9"

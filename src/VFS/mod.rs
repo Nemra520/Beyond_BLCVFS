@@ -4,3 +4,4 @@ pub mod FileType;
 
 pub use Package::MultiVFS;
 pub use FileType::LuaDecipher;
+pub use FileType::PckExtractor;

@@ -1,4 +1,4 @@
-use blc_vfs::MultiVFS;
+use blc_vfs::{MultiVFS, PckExtractor};
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -39,6 +39,10 @@ fn handle_command(parts: Vec<&str>, vfs: &mut Option<MultiVFS>, current_dir: &mu
         "extract" => cmd_extract(parts, vfs, current_dir),
         "extract-dir" => cmd_extract_dir(parts, vfs, current_dir),
         "extract-all" => cmd_extract_all(parts, vfs, current_dir),
+        "extract-pck" => cmd_extract_pck(parts, vfs, current_dir),
+        "extract-pck-all" => cmd_extract_pck_all(parts, vfs, current_dir),
+        "extract-pck-entries" => cmd_extract_pck_entries(parts, vfs, current_dir),
+        "pck-list" => cmd_pck_list(vfs),
         "packages" => cmd_packages(vfs),
         "help" => print_help(),
         "quit" | "exit" => {
@@ -314,6 +318,262 @@ fn cmd_extract_all(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &Strin
     }
 }
 
+fn cmd_extract_pck(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &String) {
+    if parts.len() < 2 {
+        println!("Usage: extract-pck <pck_file> [output_dir]");
+        println!("  Extracts a .pck file, removing VFS encryption to produce a valid AKPK PCK.");
+        return;
+    }
+
+    match vfs {
+        Some(mounted_vfs) => {
+            let file_path = if parts[1].starts_with('/') {
+                parts[1][1..].to_string()
+            } else {
+                join_paths(current_dir, parts[1])
+            };
+
+            if !is_file(mounted_vfs, &file_path) {
+                println!("✗ File not found: {}", file_path);
+                return;
+            }
+
+            let output_dir = if parts.len() > 2 {
+                PathBuf::from(parts[2])
+            } else {
+                PathBuf::from("output")
+            };
+
+            match mounted_vfs.read_pck_file(&file_path) {
+                Ok(decrypted_data) => {
+                    let file_name = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("output.pck");
+                    let output_path = output_dir.join(file_name);
+
+                    if let Some(parent) = output_path.parent() {
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            println!("✗ Failed to create output directory: {}", e);
+                            return;
+                        }
+                    }
+
+                    match std::fs::write(&output_path, &decrypted_data) {
+                        Ok(()) => {
+                            println!(
+                                "✓ PCK extracted ({} bytes) -> {}",
+                                decrypted_data.len(),
+                                output_path.display()
+                            );
+                        }
+                        Err(e) => println!("✗ Failed to write file: {}", e),
+                    }
+                }
+                Err(e) => println!("✗ PCK extraction failed: {}", e),
+            }
+        }
+        None => {
+            println!("✗ Please mount a folder first");
+        }
+    }
+}
+
+fn cmd_extract_pck_all(parts: Vec<&str>, vfs: &Option<MultiVFS>, _current_dir: &String) {
+    match vfs {
+        Some(mounted_vfs) => {
+            let output_dir = if parts.len() > 1 {
+                PathBuf::from(parts[1])
+            } else {
+                PathBuf::from("output")
+            };
+
+            let pck_files = mounted_vfs.list_pck_files();
+            let total = pck_files.len();
+
+            if total == 0 {
+                println!("No .pck files found in VFS");
+                return;
+            }
+
+            println!("Found {} PCK files, extracting...", total);
+
+            let mut success = 0;
+            let mut failed = 0;
+
+            for (i, pck_path) in pck_files.iter().enumerate() {
+                match mounted_vfs.read_pck_file(pck_path) {
+                    Ok(decrypted_data) => {
+                        let file_name = std::path::Path::new(pck_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("output.pck");
+                        let output_path = output_dir.join(file_name);
+
+                        if let Some(parent) = output_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+
+                        match std::fs::write(&output_path, &decrypted_data) {
+                            Ok(()) => success += 1,
+                            Err(_) => failed += 1,
+                        }
+                    }
+                    Err(_) => failed += 1,
+                }
+
+                if (i + 1) % 10 == 0 || i + 1 == total {
+                    println!("Progress: {}/{}", i + 1, total);
+                }
+            }
+
+            println!("\nPCK extraction complete!");
+            println!("  Success: {}", success);
+            println!("  Failed: {}", failed);
+            println!("  Output: {}", output_dir.display());
+        }
+        None => {
+            println!("✗ Please mount a folder first");
+        }
+    }
+}
+
+fn cmd_extract_pck_entries(parts: Vec<&str>, vfs: &Option<MultiVFS>, current_dir: &String) {
+    match vfs {
+        Some(mounted_vfs) => {
+            if parts.len() < 2 {
+                println!("Usage: extract-pck-entries <pck-file> [output_dir]");
+                println!("  Extracts individual WEM/BNK files from a PCK archive");
+                return;
+            }
+
+            let pck_path = join_paths(current_dir, parts[1]);
+            let output_dir = if parts.len() > 2 {
+                PathBuf::from(parts[2])
+            } else {
+                PathBuf::from("output")
+            };
+
+            println!("Extracting PCK entries: {}", pck_path);
+
+            let raw_data = match mounted_vfs.read_file(&pck_path) {
+                Ok(data) => data,
+                Err(e) => {
+                    println!("✗ Failed to read PCK file: {}", e);
+                    return;
+                }
+            };
+
+            let pck_name = std::path::Path::new(&pck_path)
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("pck");
+
+            match blc_vfs::PckExtractor::extract_entries(&raw_data, &output_dir, Some(pck_name)) {
+                Ok(paths) => {
+                    println!("✓ Successfully extracted {} entries", paths.len());
+                    
+                    let mut wem_count = 0;
+                    let mut bnk_count = 0;
+                    let mut other_count = 0;
+                    
+                    for path in &paths {
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        match ext {
+                            "wem" => wem_count += 1,
+                            "bnk" => bnk_count += 1,
+                            _ => other_count += 1,
+                        }
+                    }
+                    
+                    println!("  WEM files: {}", wem_count);
+                    println!("  BNK files: {}", bnk_count);
+                    if other_count > 0 {
+                        println!("  Other files: {}", other_count);
+                    }
+                    println!("  Output: {}/{}", output_dir.display(), pck_name);
+                }
+                Err(e) => {
+                    println!("✗ Failed to extract entries: {}", e);
+                }
+            }
+        }
+        None => {
+            println!("✗ Please mount a folder first");
+        }
+    }
+}
+
+fn cmd_pck_list(vfs: &Option<MultiVFS>) {
+    match vfs {
+        Some(mounted_vfs) => {
+            let pck_files = mounted_vfs.list_pck_files();
+
+            if pck_files.is_empty() {
+                println!("No .pck files found in VFS");
+                return;
+            }
+
+            println!("\nPCK files ({} total):", pck_files.len());
+            println!("{}", "─".repeat(80));
+
+            for pck_path in &pck_files {
+                let raw_data = match mounted_vfs.read_file(pck_path) {
+                    Ok(data) => data,
+                    Err(_) => {
+                        println!("  {} (failed to read)", pck_path);
+                        continue;
+                    }
+                };
+
+                let content = match PckExtractor::parse_pck(&raw_data) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        println!("  {} (failed to parse)", pck_path);
+                        continue;
+                    }
+                };
+
+                let mut wem_count = 0;
+                let mut bnk_count = 0;
+                let mut plg_count = 0;
+                for entry in &content.entries {
+                    if entry.size < 4 {
+                        continue;
+                    }
+                    let offset = entry.offset as usize;
+                    let size = entry.size as usize;
+                    if offset + size > raw_data.len() {
+                        continue;
+                    }
+                    let magic = &raw_data[offset..offset + size.min(4)];
+                    match magic {
+                        b"BKHD" => bnk_count += 1,
+                        b"RIFF" | b"RIFX" => wem_count += 1,
+                        b"PLUG" => plg_count += 1,
+                        _ => {}
+                    }
+                }
+
+                println!(
+                    "  {} ({} entries, {} lang, WEM={}, BNK={}, PLG={})",
+                    pck_path,
+                    content.entries.len(),
+                    content.languages.len(),
+                    wem_count,
+                    bnk_count,
+                    plg_count
+                );
+            }
+
+            println!("{}", "─".repeat(80));
+        }
+        None => {
+            println!("✗ Please mount a folder first");
+        }
+    }
+}
+
 fn cmd_packages(vfs: &Option<MultiVFS>) {
     match vfs {
         Some(mounted_vfs) => {
@@ -352,6 +612,10 @@ fn print_help() {
     println!("  extract <file>                 - Extract single file");
     println!("  extract-dir <dir> [output]     - Extract all files in a directory");
     println!("  extract-all [output_dir]       - Extract all files");
+    println!("  extract-pck <file> [output]    - Extract PCK file (decrypt VFS, output .pck)");
+    println!("  extract-pck-all [output]       - Extract all PCK files from VFS");
+    println!("  extract-pck-entries <file> [out] - Extract WEM/BNK files from PCK");
+    println!("  pck-list                       - List all PCK files and their contents");
     println!("  packages                       - List all mounted packages");
     println!("  help                           - Show this help");
     println!("  quit / exit                    - Exit program");
