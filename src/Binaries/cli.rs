@@ -703,15 +703,19 @@ fn is_file(vfs: &MultiVFS, path: &str) -> bool {
 }
 
 fn extract_file(vfs: &MultiVFS, file_path: &str, output_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let data = vfs.read_file(file_path)?;
+    let data = if file_path.to_lowercase().ends_with(".pck") {
+        vfs.read_pck_file(file_path)?
+    } else {
+        vfs.read_file(file_path)?
+    };
     let output_path = output_dir.join(file_path);
-    
+
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    
+
     std::fs::write(&output_path, data)?;
     println!("✓ Extracted: {}", file_path);
-    
+
     Ok(())
 }

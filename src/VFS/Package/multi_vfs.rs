@@ -3,6 +3,7 @@ use crate::VFS::FileType::PckExtractor;
 use super::Package;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use rayon::prelude::*;
 
 pub struct MultiVFS {
     packages: HashMap<String, Package>,
@@ -16,29 +17,58 @@ impl MultiVFS {
             file_to_package: HashMap::new(),
         }
     }
-    
+
     pub fn mount_folder<P: AsRef<Path>>(folder: P) -> Result<Self> {
         let folder = folder.as_ref();
-        let mut multi_vfs = Self::new();
-        
-        for entry in std::fs::read_dir(folder)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if path.is_dir() {
-                if let Ok(package) = Package::mount(&path) {
-                    let package_name = package.name.clone();
-                    println!("  Found package: {} ({} files)", package_name, package.get_file_count());
-                    
-                    for file_name in package.list_files() {
-                        multi_vfs.file_to_package.insert(file_name.to_string(), package_name.clone());
+
+        // Collect all package directories first
+        let package_dirs: Vec<PathBuf> = std::fs::read_dir(folder)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.path())
+            .collect();
+
+        let total_packages = package_dirs.len();
+        println!("  Found {} package directories to mount", total_packages);
+
+        // Use rayon for parallel processing
+        let mounted_packages: Vec<(String, Package, Vec<String>)> = package_dirs
+            .par_iter()
+            .filter_map(|path| {
+                match Package::mount(path) {
+                    Ok(package) => {
+                        let package_name = package.name.clone();
+                        let files: Vec<String> = package.list_files()
+                            .into_iter()
+                            .map(|s| s.to_string())
+                            .collect();
+                        Some((package_name, package, files))
                     }
-                    
-                    multi_vfs.packages.insert(package_name, package);
+                    Err(_) => None
                 }
+            })
+            .collect();
+
+        let mut multi_vfs = Self::new();
+        let mut total_files = 0usize;
+
+        for (idx, (package_name, package, files)) in mounted_packages.into_iter().enumerate() {
+            let file_count = files.len();
+            total_files += file_count;
+
+            for file in files {
+                multi_vfs.file_to_package.insert(file, package_name.clone());
             }
+
+            multi_vfs.packages.insert(package_name.clone(), package);
+
+            println!("  Mounted [{}/{}]: {} ({} files, total: {})",
+                idx + 1, total_packages, package_name, file_count, total_files);
         }
-        
+
+        println!("  ✓ Mounted {} packages with {} total files",
+            multi_vfs.packages.len(), total_files);
+
         Ok(multi_vfs)
     }
     

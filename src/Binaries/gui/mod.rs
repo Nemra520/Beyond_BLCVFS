@@ -30,6 +30,15 @@ pub struct BlcVfsApp {
     show_search: bool,
     pending_extraction: Option<Vec<String>>,
     pck_view: Option<PckView>,
+    // Async extraction state
+    extraction_state: Option<ExtractionState>,
+}
+
+struct ExtractionState {
+    files: Vec<String>,
+    current_index: usize,
+    success: usize,
+    failed: usize,
 }
 
 impl Default for BlcVfsApp {
@@ -47,25 +56,33 @@ impl Default for BlcVfsApp {
             show_search: false,
             pending_extraction: None,
             pck_view: None,
+            extraction_state: None,
         }
     }
 }
 
 impl eframe::App for BlcVfsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Progress bar at top (if extracting) - render before CentralPanel
+        if self.extract_progress.is_some() {
+            egui::TopBottomPanel::top("progress_panel").show(ctx, |ui| {
+                self.render_progress(ui);
+            });
+        }
+        
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with buttons
             self.render_header(ui, ctx);
             ui.separator();
-            
+
             // Status bar
             self.render_status_bar(ui);
-            
+
             // Search panel
             if self.show_search {
                 self.render_search_panel(ctx);
             }
-            
+
             // Main content area
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Some(ref mut pck_view) = self.pck_view {
@@ -74,20 +91,66 @@ impl eframe::App for BlcVfsApp {
                     self.render_file_browser(ui);
                 }
             });
-            
-            // Bottom status and progress
+
+            // Bottom status
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label(&self.status_message);
             });
-            
-            self.render_progress(ui);
         });
         
-        // Process pending extraction outside of UI rendering
+        // Process pending extraction - initialize async state
         if let Some(files) = self.pending_extraction.take() {
-            self.process_extraction(files);
+            let total = files.len();
+            self.extract_progress = Some(ExtractProgress {
+                current: 0,
+                total,
+                success: 0,
+                failed: 0,
+            });
+            self.extraction_state = Some(ExtractionState {
+                files,
+                current_index: 0,
+                success: 0,
+                failed: 0,
+            });
             ctx.request_repaint();
+        }
+
+        // Process one file per frame to keep UI responsive
+        if let Some(ref mut state) = self.extraction_state {
+            if state.current_index < state.files.len() {
+                if let Some(ref vfs) = self.vfs {
+                    let output_dir = PathBuf::from("output");
+                    let file = &state.files[state.current_index];
+
+                    match ExtractionManager::extract_single_file(vfs, file, &output_dir) {
+                        Ok(()) => state.success += 1,
+                        Err(_) => state.failed += 1,
+                    }
+
+                    state.current_index += 1;
+
+                    // Update progress
+                    self.extract_progress = Some(ExtractProgress {
+                        current: state.current_index,
+                        total: state.files.len(),
+                        success: state.success,
+                        failed: state.failed,
+                    });
+
+                    // Request repaint to show progress
+                    ctx.request_repaint();
+                }
+            } else {
+                // Extraction complete
+                self.status_message = format!(
+                    "✓ Extracted {} files, ✗ {} failed",
+                    state.success, state.failed
+                );
+                self.extract_progress = None;
+                self.extraction_state = None;
+            }
         }
     }
 }
@@ -231,12 +294,23 @@ impl BlcVfsApp {
                 });
                 
                 ui.separator();
-                
+
+                // Use virtualized rendering for search results
+                let row_height = 24.0;
+                let total_rows = self.search_results.len();
+                let search_results = self.search_results.clone();
+
                 egui::ScrollArea::vertical()
                     .max_height(300.0)
-                    .show(ui, |ui| {
-                        for result in &self.search_results.clone() {
+                    .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                        for row_index in row_range {
+                            if row_index >= search_results.len() {
+                                break;
+                            }
+                            let result = &search_results[row_index];
+
                             ui.horizontal(|ui| {
+                                ui.set_min_height(row_height);
                                 ui.label("📄");
                                 if ui.selectable_label(false, result).clicked() {
                                     self.navigate_to_file(result);
@@ -264,15 +338,21 @@ impl BlcVfsApp {
     fn render_progress(&self, ui: &mut egui::Ui) {
         if let Some(progress) = &self.extract_progress {
             let percentage = if progress.total > 0 {
-                (progress.current as f32 / progress.total as f32 * 100.0) as i32
+                progress.current as f32 / progress.total as f32
             } else {
-                0
+                0.0
             };
-            
+
             ui.separator();
+
+            // Progress bar
+            let progress_bar = egui::ProgressBar::new(percentage)
+                .text(format!("Extracting... {:.0}% ({}/{})", percentage * 100.0, progress.current, progress.total));
+            ui.add(progress_bar);
+
+            // Status text
             ui.horizontal(|ui| {
-                ui.label(format!("Extracting... {}% ({}/{})", percentage, progress.current, progress.total));
-                ui.label(format!("✓ {}  ✗ {}", progress.success, progress.failed));
+                ui.label(format!("✓ Success: {}  ✗ Failed: {}", progress.success, progress.failed));
             });
         }
     }
@@ -355,46 +435,15 @@ impl BlcVfsApp {
         }
     }
     
-    fn process_extraction(&mut self, files: Vec<String>) {
-        if let Some(vfs) = &self.vfs {
-            let output_dir = PathBuf::from("output");
-            let total = files.len();
-            
-            self.extract_progress = Some(ExtractProgress {
-                current: 0,
-                total,
-                success: 0,
-                failed: 0,
-            });
-            
-            let mut success = 0;
-            let mut failed = 0;
-            
-            for (i, file) in files.iter().enumerate() {
-                match ExtractionManager::extract_single_file(vfs, file, &output_dir) {
-                    Ok(()) => success += 1,
-                    Err(_) => failed += 1,
-                }
-                
-                self.extract_progress = Some(ExtractProgress {
-                    current: i + 1,
-                    total,
-                    success,
-                    failed,
-                });
-            }
-            
-            self.status_message = format!("✓ Extracted {} files, ✗ {} failed", success, failed);
-            self.extract_progress = None;
-        }
-    }
-    
     fn perform_search(&mut self) {
         if let Some(vfs) = &self.vfs {
             let query = self.search_query.to_lowercase();
+            const MAX_RESULTS: usize = 1000;
+
             self.search_results = vfs.list_all_files()
                 .into_iter()
                 .filter(|f| f.to_lowercase().contains(&query))
+                .take(MAX_RESULTS)
                 .map(|s| s.to_string())
                 .collect();
         }

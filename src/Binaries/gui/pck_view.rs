@@ -51,35 +51,50 @@ impl PckViewUI {
             ui.label("Size");
         });
         ui.separator();
-        
+
+        // Use ScrollArea with virtualized rows for large PCK files
+        let row_height = 24.0;
+        let total_rows = pck_view.entries.len();
+
         let mut toggle_entry = None;
         let mut export_single = None;
-        
-        for entry in &pck_view.entries {
-            ui.horizontal(|ui| {
-                let mut is_selected = pck_view.selected_entries.contains(&entry.file_id);
-                if ui.checkbox(&mut is_selected, "").clicked() {
-                    toggle_entry = Some(entry.file_id);
-                }
-                ui.separator();
-                
-                let icon = match entry.entry_type.as_str() {
-                    "WEM" => "🔊",
-                    "BNK" => "🎵",
-                    _ => "📄",
-                };
-                ui.label(format!("{} {}", icon, entry.file_id));
-                ui.separator();
-                ui.label(&entry.entry_type);
-                ui.separator();
-                ui.label(format!("{} bytes", entry.size));
-                
-                if ui.small_button("Export").clicked() {
-                    export_single = Some(entry.file_id);
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                for row_index in row_range {
+                    if row_index >= pck_view.entries.len() {
+                        break;
+                    }
+                    let entry = &pck_view.entries[row_index];
+
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(row_height);
+
+                        let mut is_selected = pck_view.selected_entries.contains(&entry.file_id);
+                        if ui.checkbox(&mut is_selected, "").clicked() {
+                            toggle_entry = Some(entry.file_id);
+                        }
+                        ui.separator();
+
+                        let icon = match entry.entry_type.as_str() {
+                            "WEM" => "🔊",
+                            "BNK" => "🎵",
+                            _ => "📄",
+                        };
+                        ui.label(format!("{} {}", icon, entry.file_id));
+                        ui.separator();
+                        ui.label(&entry.entry_type);
+                        ui.separator();
+                        ui.label(format!("{} bytes", entry.size));
+
+                        if ui.small_button("Export").clicked() {
+                            export_single = Some(entry.file_id);
+                        }
+                    });
                 }
             });
-        }
-        
+
         if let Some(file_id) = toggle_entry {
             if pck_view.selected_entries.contains(&file_id) {
                 pck_view.selected_entries.remove(&file_id);
@@ -87,7 +102,7 @@ impl PckViewUI {
                 pck_view.selected_entries.insert(file_id);
             }
         }
-        
+
         if let Some(file_id) = export_single {
             Self::export_single_entry(pck_view, vfs, file_id, status_message);
         }

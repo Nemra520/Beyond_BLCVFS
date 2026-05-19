@@ -41,12 +41,22 @@ impl SearchPanelUI {
                 });
                 
                 ui.separator();
-                
+
+                // Use virtualized rendering for search results
+                let row_height = 24.0;
+                let total_rows = search_results.len();
+
                 egui::ScrollArea::vertical()
                     .max_height(300.0)
-                    .show(ui, |ui| {
-                        for result in search_results {
+                    .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                        for row_index in row_range {
+                            if row_index >= search_results.len() {
+                                break;
+                            }
+                            let result = &search_results[row_index];
+
                             ui.horizontal(|ui| {
+                                ui.set_min_height(row_height);
                                 ui.label("📄");
                                 if ui.selectable_label(false, result).clicked() {
                                     response.navigate_to = Some(result.clone());

@@ -25,58 +25,73 @@ impl FileBrowserUI {
             toggle_selection: None,
             open_pck: None,
         };
-        
+
         if entries.is_empty() {
             ui.label("(empty directory)");
             return response;
         }
-        
+
         ui.horizontal(|ui| {
             ui.selectable_value(&mut false, false, "Name");
             ui.selectable_value(&mut false, false, "Type");
         });
         ui.separator();
-        
-        for entry in entries {
-            ui.horizontal(|ui| {
-                let mut is_selected = selected_files.contains(&entry.full_path);
-                
-                if ui.checkbox(&mut is_selected, "").clicked() {
-                    response.toggle_selection = Some(entry.full_path.clone());
-                }
-                
-                let icon = if entry.is_dir { "📁" } else { "📄" };
-                let text = format!("{} {}", icon, entry.name);
-                
-                let is_pck = entry.name.ends_with(".pck");
-                let is_selected_file = selected_file.as_ref() == Some(&entry.full_path);
-                
-                let selectable_response = ui.selectable_label(is_selected_file, &text);
-                if selectable_response.double_clicked() {
-                    if entry.is_dir {
-                        response.new_dir = Some(entry.full_path.clone());
-                    } else if is_pck {
-                        response.open_pck = Some(entry.full_path.clone());
+
+        // Use ScrollArea with virtualized rows for large lists
+        let row_height = 24.0;
+        let total_rows = entries.len();
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                for row_index in row_range {
+                    if row_index >= entries.len() {
+                        break;
                     }
-                } else if selectable_response.clicked() {
-                    if entry.is_dir {
-                        response.new_dir = Some(entry.full_path.clone());
-                    }
-                }
-                
-                if !entry.is_dir {
-                    if is_pck {
-                        if ui.small_button("Open").clicked() {
-                            response.open_pck = Some(entry.full_path.clone());
+                    let entry = &entries[row_index];
+
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(row_height);
+
+                        let mut is_selected = selected_files.contains(&entry.full_path);
+
+                        if ui.checkbox(&mut is_selected, "").clicked() {
+                            response.toggle_selection = Some(entry.full_path.clone());
                         }
-                    }
-                    if ui.small_button("Extract").clicked() {
-                        response.extract_file = Some(entry.full_path.clone());
-                    }
+
+                        let icon = if entry.is_dir { "📁" } else { "📄" };
+                        let text = format!("{} {}", icon, entry.name);
+
+                        let is_pck = entry.name.ends_with(".pck");
+                        let is_selected_file = selected_file.as_ref() == Some(&entry.full_path);
+
+                        let selectable_response = ui.selectable_label(is_selected_file, &text);
+                        if selectable_response.double_clicked() {
+                            if entry.is_dir {
+                                response.new_dir = Some(entry.full_path.clone());
+                            } else if is_pck {
+                                response.open_pck = Some(entry.full_path.clone());
+                            }
+                        } else if selectable_response.clicked() {
+                            if entry.is_dir {
+                                response.new_dir = Some(entry.full_path.clone());
+                            }
+                        }
+
+                        if !entry.is_dir {
+                            if is_pck {
+                                if ui.small_button("Open").clicked() {
+                                    response.open_pck = Some(entry.full_path.clone());
+                                }
+                            }
+                            if ui.small_button("Extract").clicked() {
+                                response.extract_file = Some(entry.full_path.clone());
+                            }
+                        }
+                    });
                 }
             });
-        }
-        
+
         response
     }
 }
@@ -88,36 +103,39 @@ pub fn list_directory(vfs: &blc_vfs::MultiVFS, current_dir: &str) -> Vec<FileEnt
     } else {
         format!("{}/", current_dir.trim_matches('/'))
     };
-    
+
     let mut entries: HashSet<String> = HashSet::new();
-    
+    let mut dir_entries: HashSet<String> = HashSet::new();
+
     for file in &all_files {
         let file_str = file.to_string();
-        
+
         if current_dir.is_empty() || file_str.starts_with(&current_prefix) {
             let remaining = if current_dir.is_empty() {
                 file_str.as_str()
             } else {
                 &file_str[current_prefix.len()..]
             };
-            
+
             if let Some(slash_pos) = remaining.find('/') {
-                entries.insert(remaining[..slash_pos].to_string());
+                let dir_name = remaining[..slash_pos].to_string();
+                entries.insert(dir_name.clone());
+                dir_entries.insert(dir_name);
             } else if !remaining.is_empty() {
                 entries.insert(remaining.to_string());
             }
         }
     }
-    
+
     entries.into_iter().map(|name| {
         let full_path = if current_dir.is_empty() {
             name.clone()
         } else {
             format!("{}/{}", current_dir, name)
         };
-        
-        let is_dir = all_files.iter().any(|f| f.starts_with(&format!("{}/", full_path)));
-        
+
+        let is_dir = dir_entries.contains(&name);
+
         FileEntry { name, is_dir, full_path }
     }).collect()
 }

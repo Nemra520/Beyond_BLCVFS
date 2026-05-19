@@ -10,13 +10,21 @@ impl ExtractionManager {
         output_dir: &PathBuf,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("[DEBUG] extract_file: reading '{}'", file_path);
-        
-        let data = vfs.read_file(file_path)
-            .map_err(|e| {
-                println!("[DEBUG] extract_file: read failed for '{}': {}", file_path, e);
-                format!("Failed to read '{}': {}", file_path, e)
-            })?;
-        
+
+        let data = if file_path.to_lowercase().ends_with(".pck") {
+            vfs.read_pck_file(file_path)
+                .map_err(|e| {
+                    println!("[DEBUG] extract_file: read_pck_file failed for '{}': {}", file_path, e);
+                    format!("Failed to read PCK '{}': {}", file_path, e)
+                })?
+        } else {
+            vfs.read_file(file_path)
+                .map_err(|e| {
+                    println!("[DEBUG] extract_file: read failed for '{}': {}", file_path, e);
+                    format!("Failed to read '{}': {}", file_path, e)
+                })?
+        };
+
         println!("[DEBUG] extract_file: read {} bytes for '{}'", data.len(), file_path);
         
         let output_path = output_dir.join(file_path);
@@ -49,48 +57,31 @@ impl ExtractionManager {
         let all_files = vfs.list_all_files();
         println!("[DEBUG] Total files in VFS: {}", all_files.len());
         println!("[DEBUG] Current directory: '{}'", current_dir);
-        
+
         let dir_prefix = if current_dir.is_empty() {
             String::new()
         } else {
             format!("{}/", current_dir.trim_matches('/'))
         };
         println!("[DEBUG] Directory prefix: '{}'", dir_prefix);
-        
-        // Build a set of all directory paths to filter them out
-        let mut dir_paths: HashSet<String> = HashSet::new();
-        for f in &all_files {
-            let mut path = f.to_string();
-            while let Some(pos) = path.rfind('/') {
-                path = path[..pos].to_string();
-                if !path.is_empty() {
-                    dir_paths.insert(path.clone());
-                }
-            }
-        }
-        println!("[DEBUG] Found {} unique directory paths", dir_paths.len());
-        
-        all_files
+
+        // Collect all files under the current directory (including subdirectories)
+        let files: Vec<String> = all_files
             .into_iter()
             .filter(|f| {
-                // Skip if this is a directory path
-                if dir_paths.contains(*f) {
-                    println!("[DEBUG] Skipping directory: '{}'", f);
-                    return false;
-                }
-                
-                let matches = if current_dir.is_empty() {
+                if current_dir.is_empty() {
+                    // In root: include all files
                     true
                 } else {
+                    // In subdirectory: include all files that start with the prefix
                     f.starts_with(&dir_prefix)
-                };
-                if matches {
-                    println!("[DEBUG] Matched file: '{}'", f);
                 }
-                matches
             })
             .map(|s| s.to_string())
-            .collect()
+            .collect();
+
+        println!("[DEBUG] Found {} files in current directory (including subdirectories)", files.len());
+        files
     }
     
     pub fn get_selected_files(
@@ -98,37 +89,31 @@ impl ExtractionManager {
         selected_files: &HashSet<String>,
     ) -> Vec<String> {
         let all_files = vfs.list_all_files();
-        
-        // Build a set of all directory paths
-        let mut dir_paths: HashSet<String> = HashSet::new();
-        for f in &all_files {
-            let mut path = f.to_string();
-            while let Some(pos) = path.rfind('/') {
-                path = path[..pos].to_string();
-                if !path.is_empty() {
-                    dir_paths.insert(path.clone());
-                }
-            }
-        }
-        
-        // Collect all files to extract (including files in selected directories)
         let mut files_to_extract: Vec<String> = Vec::new();
-        
+
         for selected in selected_files {
-            if dir_paths.contains(selected) {
-                // This is a directory, extract all files under it
-                let dir_prefix = format!("{}/", selected.trim_matches('/'));
-                for file in &all_files {
-                    if file.starts_with(&dir_prefix) && !dir_paths.contains(*file) {
-                        files_to_extract.push(file.to_string());
-                    }
+            let dir_prefix = format!("{}/", selected.trim_matches('/'));
+            let mut found_files_in_dir = false;
+
+            // Check if this is a directory by looking for files under it
+            // Include all files in the directory and its subdirectories
+            for file in &all_files {
+                if file.starts_with(&dir_prefix) {
+                    found_files_in_dir = true;
+                    // Include all files under this directory (including subdirectories)
+                    files_to_extract.push(file.to_string());
                 }
-            } else {
-                // This is a file
-                files_to_extract.push(selected.clone());
+            }
+
+            // If no files found under this path, check if it's a file itself
+            if !found_files_in_dir {
+                // Check if the selected item exists as a file in the VFS
+                if all_files.contains(&selected.as_str()) {
+                    files_to_extract.push(selected.clone());
+                }
             }
         }
-        
+
         files_to_extract
     }
 }
