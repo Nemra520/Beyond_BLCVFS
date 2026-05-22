@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+const TABLE_CFG_PACKAGE: &str = "42A8FCA6";
+
 pub struct ExtractionManager;
 
 impl ExtractionManager {
@@ -26,8 +28,24 @@ impl ExtractionManager {
         };
 
         println!("[DEBUG] extract_file: read {} bytes for '{}'", data.len(), file_path);
-        
-        let output_path = output_dir.join(file_path);
+
+        // Check if file is in package 42A8FCA6 and is .bytes -> convert to JSON
+        let is_bytes_in_target_pkg = file_path.to_lowercase().ends_with(".bytes")
+            && vfs.get_file_package(file_path)
+                .map(|pkg| pkg.eq_ignore_ascii_case(TABLE_CFG_PACKAGE))
+                .unwrap_or(false);
+
+        let (output_path, write_data) = if is_bytes_in_target_pkg {
+            let json_str = blc_vfs::SparkBytesParser::parse_to_json(&data);
+            let json_path = file_path.strip_suffix(".bytes")
+                .map(|s| format!("{}.json", s))
+                .unwrap_or_else(|| format!("{}.json", file_path));
+            println!("[DEBUG] extract_file: converting .bytes to JSON for '{}'", file_path);
+            (output_dir.join(json_path), json_str.into_bytes())
+        } else {
+            (output_dir.join(file_path), data)
+        };
+
         println!("[DEBUG] extract_file: output path {:?}", output_path);
         
         if let Some(parent) = output_path.parent() {
@@ -40,7 +58,7 @@ impl ExtractionManager {
         }
         
         println!("[DEBUG] extract_file: writing to {:?}", output_path);
-        std::fs::write(&output_path, data)
+        std::fs::write(&output_path, write_data)
             .map_err(|e| {
                 println!("[DEBUG] extract_file: write failed: {}", e);
                 format!("Failed to write '{}': {}", file_path, e)

@@ -15,6 +15,7 @@ path = "src/Binaries/gui_main.rs"
 chacha20 = "0.9"
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
 memmap2 = "0.9"
 walkdir = "2.5"

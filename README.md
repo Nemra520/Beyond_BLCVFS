@@ -128,6 +128,9 @@ src/
 │   │       ├── mod.rs      # xLua module root
 │   │       ├── lua_decipher.rs  # Lua decryption
 │   │       └── xxtea.rs        # XXTEA implementation
+│   └── sparkbytes/
+│   │       ├── mod.rs      # SparkBytes module root
+│   │       └── bytes_parser.rs  # .bytes file parser (TableCfg)
 │   └── BLC/
 │       ├── mod.rs          # BLC module root
 │       ├── types.rs        # Data structures
@@ -221,6 +224,9 @@ The GUI provides:
 - ✅ Automatic decryption of encrypted content
 - ✅ Support for multiple platforms (Windows, Android bundles)
 - ✅ Memory-efficient large file handling
+- ✅ **Partial .bytes file support**: TableCfg package (42A8FCA6) .bytes files → JSON
+  - ❌ ExtendDData .bin files (not yet supported)
+  - ❌ Streaming .bytes files (not yet supported)
 
 ## 🔬 Technical Highlights
 
@@ -252,6 +258,7 @@ The GUI provides:
 - `walkdir` v2.5 - Directory traversal
 - `md-5` v0.10 - MD5 hashing
 - `byteorder` v1.5 - Byte order utilities
+- `serde_json` v1.0 - JSON serialization for .bytes parsing
 
 ### GUI Dependencies
 - `eframe` v0.29 - egui framework integration
