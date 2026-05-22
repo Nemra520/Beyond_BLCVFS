@@ -2,6 +2,7 @@
 **Remember: Delete this within 24 hours.**
 
 A high-performance tool for mounting and extracting game resource packages from Arknights: Endfield (BLC format).
+Mounting 260,000 files of 50GB only takes 1 second
 
 ## ⚠️ DISCLAIMER
 
