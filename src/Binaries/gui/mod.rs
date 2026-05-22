@@ -425,6 +425,33 @@ impl BlcVfsApp {
         if response.should_close {
             self.show_packages_window = false;
         }
+
+        // Handle package unloading
+        for package_name in response.packages_to_unload {
+            if let Some(vfs) = &mut self.vfs {
+                match vfs.unload_package(&package_name) {
+                    Ok(()) => {
+                        self.status_message = format!("✓ Unloaded package '{}'", package_name);
+                        self.refresh_entries();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("✗ Failed to unload '{}': {}", package_name, e);
+                    }
+                }
+            }
+        }
+
+        // Check if all packages have been unloaded
+        if let Some(vfs) = &self.vfs {
+            if vfs.get_package_count() == 0 {
+                self.vfs = None;
+                self.current_dir.clear();
+                self.selected_files.clear();
+                self.entries.clear();
+                self.show_packages_window = false;
+                self.status_message = "All packages unloaded. Click 'Mount' to select a VFS folder".to_string();
+            }
+        }
     }
 
     // Helper methods
