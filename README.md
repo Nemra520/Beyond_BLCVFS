@@ -8,7 +8,7 @@ A high-performance tool for mounting and extracting game resource packages from 
 
 **THIS SOFTWARE IS PROVIDED FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY.**
 
-This project is a reverse-engineering tool designed for studying file formats and encryption methods. The author does not condone or encourage:
+This project is a tool designed for studying file formats and encryption methods. The author does not condone or encourage:
 
 - Piracy or copyright infringement
 - Unauthorized distribution of game assets
