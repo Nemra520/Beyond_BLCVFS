@@ -8,6 +8,9 @@ use rayon::prelude::*;
 pub struct MultiVFS {
     packages: HashMap<String, Package>,
     file_to_package: HashMap<String, String>,
+    // Cache for file list to avoid recomputation
+    cached_file_list: Vec<String>,
+    cache_valid: bool,
 }
 
 impl MultiVFS {
@@ -15,6 +18,8 @@ impl MultiVFS {
         Self {
             packages: HashMap::new(),
             file_to_package: HashMap::new(),
+            cached_file_list: Vec::new(),
+            cache_valid: false,
         }
     }
 
@@ -69,14 +74,23 @@ impl MultiVFS {
         println!("  ✓ Mounted {} packages with {} total files",
             multi_vfs.packages.len(), total_files);
 
+        // Pre-build cache for file list
+        multi_vfs.cached_file_list = multi_vfs.file_to_package.keys().cloned().collect();
+        multi_vfs.cache_valid = true;
+
         Ok(multi_vfs)
     }
-    
+
     pub fn list_packages(&self) -> Vec<&str> {
         self.packages.keys().map(|s| s.as_str()).collect()
     }
-    
+
     pub fn list_all_files(&self) -> Vec<&str> {
+        if self.cache_valid {
+            // Return cached file list as string slices
+            return self.cached_file_list.iter().map(|s| s.as_str()).collect();
+        }
+        // Fallback to direct iteration (should not happen with proper cache management)
         self.file_to_package.keys().map(|s| s.as_str()).collect()
     }
     
@@ -111,6 +125,39 @@ impl MultiVFS {
     
     pub fn file_exists(&self, path: &str) -> bool {
         self.file_to_package.contains_key(path)
+    }
+
+    /// Get file size without reading the entire file
+    pub fn get_file_size(&self, path: &str) -> Option<usize> {
+        let package_name = self.file_to_package.get(path)?;
+        let package = self.packages.get(package_name)?;
+        package.get_file_info(path).map(|info| info.len as usize)
+    }
+
+    /// Unload a package by name, removing all its files from the VFS
+    pub fn unload_package(&mut self, package_name: &str) -> Result<()> {
+        // Remove the package
+        let package = self.packages
+            .remove(package_name)
+            .ok_or_else(|| BlcError::FileNotFound(PathBuf::from(package_name)))?;
+
+        // Remove all files associated with this package
+        let files_to_remove: Vec<String> = self.file_to_package
+            .iter()
+            .filter(|(_, pkg_name)| *pkg_name == package_name)
+            .map(|(file_path, _)| file_path.clone())
+            .collect();
+
+        for file_path in files_to_remove {
+            self.file_to_package.remove(&file_path);
+        }
+
+        // Invalidate cache
+        self.cache_valid = false;
+        self.cached_file_list.clear();
+
+        println!("  ✓ Unloaded package '{}' ({} files removed)", package_name, package.get_file_count());
+        Ok(())
     }
 
     pub fn list_pck_files(&self) -> Vec<&str> {
@@ -149,5 +196,13 @@ impl MultiVFS {
         }
 
         Ok((success, failed))
+    }
+
+    /// Get package names and their file counts for display
+    pub fn get_package_files(&self) -> Vec<(String, usize)> {
+        self.packages
+            .iter()
+            .map(|(name, package)| (name.clone(), package.get_file_count()))
+            .collect()
     }
 }

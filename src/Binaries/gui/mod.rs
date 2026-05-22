@@ -1,4 +1,5 @@
 use eframe::egui;
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -7,6 +8,10 @@ mod pck_view;
 mod file_browser;
 mod search_panel;
 mod extraction;
+mod header;
+mod status_bar;
+mod progress_bar;
+mod packages_window;
 
 pub use types::*;
 pub use pck_view::PckViewUI;
@@ -16,6 +21,11 @@ pub use extraction::ExtractionManager;
 // SearchPanelUI is defined but currently unused - kept for future use
 #[allow(unused_imports)]
 pub use search_panel::SearchPanelUI;
+
+use header::HeaderUI;
+use status_bar::StatusBarUI;
+use progress_bar::ProgressBarUI;
+use packages_window::PackagesWindowUI;
 
 pub struct BlcVfsApp {
     vfs: Option<blc_vfs::MultiVFS>,
@@ -28,6 +38,7 @@ pub struct BlcVfsApp {
     search_query: String,
     search_results: Vec<String>,
     show_search: bool,
+    show_packages_window: bool,
     pending_extraction: Option<Vec<String>>,
     pck_view: Option<PckView>,
     // Async extraction state
@@ -54,6 +65,7 @@ impl Default for BlcVfsApp {
             search_query: String::new(),
             search_results: Vec::new(),
             show_search: false,
+            show_packages_window: false,
             pending_extraction: None,
             pck_view: None,
             extraction_state: None,
@@ -66,10 +78,12 @@ impl eframe::App for BlcVfsApp {
         // Progress bar at top (if extracting) - render before CentralPanel
         if self.extract_progress.is_some() {
             egui::TopBottomPanel::top("progress_panel").show(ctx, |ui| {
-                self.render_progress(ui);
+                if let Some(ref progress) = self.extract_progress {
+                    ProgressBarUI::render(ui, progress);
+                }
             });
         }
-        
+
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with buttons
             self.render_header(ui, ctx);
@@ -91,14 +105,13 @@ impl eframe::App for BlcVfsApp {
                     self.render_file_browser(ui);
                 }
             });
-
-            // Bottom status
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(&self.status_message);
-            });
         });
-        
+
+        // Bottom status bar - always visible at the bottom
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            self.render_bottom_status_bar(ui);
+        });
+
         // Process pending extraction - initialize async state
         if let Some(files) = self.pending_extraction.take() {
             let total = files.len();
@@ -117,19 +130,25 @@ impl eframe::App for BlcVfsApp {
             ctx.request_repaint();
         }
 
-        // Process one file per frame to keep UI responsive
+        // Process multiple files per frame for better throughput while keeping UI responsive
         if let Some(ref mut state) = self.extraction_state {
             if state.current_index < state.files.len() {
                 if let Some(ref vfs) = self.vfs {
                     let output_dir = PathBuf::from("output");
-                    let file = &state.files[state.current_index];
 
-                    match ExtractionManager::extract_single_file(vfs, file, &output_dir) {
-                        Ok(()) => state.success += 1,
-                        Err(_) => state.failed += 1,
+                    // Process up to 10 files per frame for better performance
+                    const FILES_PER_FRAME: usize = 10;
+                    let end_index = std::cmp::min(state.current_index + FILES_PER_FRAME, state.files.len());
+
+                    for idx in state.current_index..end_index {
+                        let file = &state.files[idx];
+                        match ExtractionManager::extract_single_file(vfs, file, &output_dir) {
+                            Ok(()) => state.success += 1,
+                            Err(_) => state.failed += 1,
+                        }
                     }
 
-                    state.current_index += 1;
+                    state.current_index = end_index;
 
                     // Update progress
                     self.extract_progress = Some(ExtractProgress {
@@ -152,87 +171,130 @@ impl eframe::App for BlcVfsApp {
                 self.extraction_state = None;
             }
         }
+
+        // Render packages window if open
+        self.render_packages_window(ctx);
     }
 }
 
 impl BlcVfsApp {
     fn render_header(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
-            ui.heading("BLC Virtual File System v0.1.0");
-            ui.separator();
-            
-            if ui.button("📁 Mount").clicked() {
-                self.mount_folder(ctx);
-            }
-            
-            if self.vfs.is_some() {
-                if self.pck_view.is_some() {
-                    if ui.button("⬅ Back to VFS").clicked() {
-                        self.pck_view = None;
-                    }
-                } else {
-                    if ui.button("🏠 Root").clicked() {
-                        self.current_dir.clear();
-                        self.selected_files.clear();
-                        self.refresh_entries();
-                    }
-                    
-                    if !self.current_dir.is_empty() {
-                        if ui.button("⬆ Up").clicked() {
-                            self.go_up();
-                        }
-                    }
-                }
-                
-                if ui.button("🔍 Search").clicked() {
-                    self.show_search = true;
-                }
-                
-                if ui.button("📦 Packages").clicked() {
-                    self.show_packages(ctx);
-                }
-            }
-        });
+        let has_parent_dir = !self.current_dir.is_empty();
+        let is_pck_view = self.pck_view.is_some();
+
+        let response = HeaderUI::render(
+            ui,
+            self.vfs.is_some(),
+            is_pck_view,
+            has_parent_dir,
+        );
+
+        // Handle header responses
+        if response.mount_clicked {
+            self.mount_folder(ctx);
+        }
+
+        if response.back_clicked {
+            self.pck_view = None;
+        }
+
+        if response.root_clicked {
+            self.current_dir.clear();
+            self.selected_files.clear();
+            self.refresh_entries();
+        }
+
+        if response.up_clicked {
+            self.go_up();
+        }
+
+        if response.search_clicked {
+            self.show_search = true;
+        }
+
+        if response.packages_clicked {
+            self.show_packages_window = true;
+        }
     }
-    
+
     fn render_status_bar(&mut self, ui: &mut egui::Ui) {
         if let Some(vfs) = &self.vfs {
-            ui.horizontal(|ui| {
-                ui.label("Packages:");
-                ui.label(format!("{}", vfs.get_package_count()));
-                ui.separator();
-                ui.label("Files:");
-                ui.label(format!("{}", vfs.get_total_file_count()));
-                ui.separator();
-                ui.label("Path:");
-                ui.label(format!("/{}", self.current_dir));
-                ui.separator();
-                ui.label("Selected:");
-                ui.label(format!("{}", self.selected_files.len()));
-            });
-            ui.separator();
-            
-            if self.pck_view.is_none() {
-                ui.horizontal(|ui| {
-                    if ui.button("📥 Extract Current Dir").clicked() {
-                        self.extract_current_dir();
-                    }
-                    
-                    if !self.selected_files.is_empty() {
-                        if ui.button(format!("📥 Extract Selected ({})", self.selected_files.len())).clicked() {
-                            self.extract_selected_files();
-                        }
-                        
-                        if ui.button("❌ Clear Selection").clicked() {
-                            self.selected_files.clear();
-                        }
-                    }
-                });
-                ui.separator();
+            let package_count = vfs.get_package_count();
+            let total_file_count = vfs.get_total_file_count();
+            let selected_count = self.selected_files.len();
+            let is_pck_view = self.pck_view.is_some();
+
+            let response = StatusBarUI::render(
+                ui,
+                package_count,
+                total_file_count,
+                &self.current_dir,
+                selected_count,
+                is_pck_view,
+            );
+
+            // Handle status bar responses
+            if response.extract_current_dir_clicked {
+                self.extract_current_dir();
+            }
+
+            if response.extract_selected_clicked {
+                self.extract_selected_files();
+            }
+
+            if response.clear_selection_clicked {
+                self.selected_files.clear();
             }
         }
     }
-    
+
+    fn render_bottom_status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.horizontal(|ui| {
+            // Left side: File details if a file is selected
+            if let Some(ref selected) = self.selected_file {
+                ui.label(format!("📄 {}", selected));
+                if let Some(ref vfs) = self.vfs {
+                    if let Some(package) = vfs.get_file_package(selected) {
+                        ui.separator();
+                        ui.label(format!("Package: {}", package));
+                    }
+                    // Show file size
+                    if let Some(size) = vfs.get_file_size(selected) {
+                        ui.separator();
+                        if size < 1024 {
+                            ui.label(format!("Size: {} bytes", size));
+                        } else if size < 1024 * 1024 {
+                            ui.label(format!("Size: {:.1} KB", size as f64 / 1024.0));
+                        } else {
+                            ui.label(format!("Size: {:.1} MB", size as f64 / (1024.0 * 1024.0)));
+                        }
+                    }
+                    // Show file type based on extension
+                    let file_type = if selected.to_lowercase().ends_with(".pck") {
+                        "WwiseSoundbankPackage"
+                    } else if selected.to_lowercase().ends_with(".ab") {
+                        "UnityAssetsbundle"
+                    } else if selected.to_lowercase().ends_with(".bytes") {
+                        "Sparkbytes"
+                    } else if selected.to_lowercase().ends_with(".lua") {
+                        "Xlua"
+                    } else if selected.to_lowercase().ends_with(".hgmmap") {
+                        "abindex"
+                    } else if selected.to_lowercase().ends_with(".json") {
+                        "json"
+                    } else {
+                        "Unknown"
+                    };
+                    ui.separator();
+                    ui.label(format!("Type: {}", file_type));
+                }
+            } else {
+                ui.label(&self.status_message);
+            }
+        });
+    }
+
     fn render_file_browser(&mut self, ui: &mut egui::Ui) {
         if self.entries.is_empty() {
             if self.vfs.is_some() {
@@ -246,14 +308,14 @@ impl BlcVfsApp {
             }
             return;
         }
-        
+
         let response = FileBrowserUI::render(
             ui,
             &self.entries,
             &self.selected_file,
             &mut self.selected_files,
         );
-        
+
         // Handle file browser responses
         if let Some(path) = response.toggle_selection {
             if self.selected_files.contains(&path) {
@@ -262,21 +324,25 @@ impl BlcVfsApp {
                 self.selected_files.insert(path);
             }
         }
-        
+
         if let Some(dir) = response.new_dir {
             self.current_dir = dir;
             self.refresh_entries();
         }
-        
+
         if let Some(file) = response.extract_file {
             self.extract_single_file(&file);
         }
-        
+
         if let Some(pck_path) = response.open_pck {
             self.open_pck_view(&pck_path);
         }
+
+        if let Some(selected) = response.selected_file {
+            self.selected_file = Some(selected);
+        }
     }
-    
+
     fn render_search_panel(&mut self, ctx: &egui::Context) {
         let mut show = self.show_search;
         egui::Window::new("Search Files")
@@ -292,7 +358,7 @@ impl BlcVfsApp {
                         self.perform_search();
                     }
                 });
-                
+
                 ui.separator();
 
                 // Use virtualized rendering for search results
@@ -321,7 +387,7 @@ impl BlcVfsApp {
                             });
                         }
                     });
-                
+
                 if !self.search_results.is_empty() {
                     ui.separator();
                     ui.label(format!("Found {} results", self.search_results.len()));
@@ -331,38 +397,42 @@ impl BlcVfsApp {
                     }
                 }
             });
-        
+
         self.show_search = show;
     }
-    
-    fn render_progress(&self, ui: &mut egui::Ui) {
-        if let Some(progress) = &self.extract_progress {
-            let percentage = if progress.total > 0 {
-                progress.current as f32 / progress.total as f32
-            } else {
-                0.0
-            };
 
-            ui.separator();
+    fn render_packages_window(&mut self, ctx: &egui::Context) {
+        if !self.show_packages_window {
+            return;
+        }
 
-            // Progress bar
-            let progress_bar = egui::ProgressBar::new(percentage)
-                .text(format!("Extracting... {:.0}% ({}/{})", percentage * 100.0, progress.current, progress.total));
-            ui.add(progress_bar);
+        // Collect package info
+        let packages: Vec<(String, usize)> = if let Some(vfs) = &self.vfs {
+            vfs.get_package_files()
+                .into_iter()
+                .map(|(name, count)| (name, count))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
-            // Status text
-            ui.horizontal(|ui| {
-                ui.label(format!("✓ Success: {}  ✗ Failed: {}", progress.success, progress.failed));
-            });
+        let response = PackagesWindowUI::render(
+            ctx,
+            &mut self.show_packages_window,
+            &packages,
+        );
+
+        if response.should_close {
+            self.show_packages_window = false;
         }
     }
-    
+
     // Helper methods
     fn mount_folder(&mut self, ctx: &egui::Context) {
         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
             self.status_message = format!("Mounting: {}", folder.display());
             ctx.request_repaint();
-            
+
             match blc_vfs::MultiVFS::mount_folder(&folder) {
                 Ok(vfs) => {
                     self.status_message = format!(
@@ -381,7 +451,7 @@ impl BlcVfsApp {
             }
         }
     }
-    
+
     fn refresh_entries(&mut self) {
         if let Some(vfs) = &self.vfs {
             self.entries = list_directory(vfs, &self.current_dir);
@@ -391,7 +461,7 @@ impl BlcVfsApp {
             });
         }
     }
-    
+
     fn go_up(&mut self) {
         if let Some(last_slash) = self.current_dir.rfind('/') {
             self.current_dir = self.current_dir[..last_slash].to_string();
@@ -400,11 +470,11 @@ impl BlcVfsApp {
         }
         self.refresh_entries();
     }
-    
+
     fn extract_single_file(&mut self, file_path: &str) {
         if let Some(vfs) = &self.vfs {
             let output_dir = PathBuf::from("output");
-            
+
             match ExtractionManager::extract_single_file(vfs, file_path, &output_dir) {
                 Ok(()) => {
                     self.status_message = format!("✓ Extracted: {}", file_path);
@@ -415,40 +485,56 @@ impl BlcVfsApp {
             }
         }
     }
-    
+
     fn extract_current_dir(&mut self) {
         if let Some(vfs) = &self.vfs {
             let files_to_extract = ExtractionManager::get_files_in_current_dir(vfs, &self.current_dir);
-            
+
             println!("[DEBUG] Files to extract: {}", files_to_extract.len());
             self.pending_extraction = Some(files_to_extract);
             self.status_message = format!("Queued {} files for extraction", self.pending_extraction.as_ref().unwrap().len());
         }
     }
-    
+
     fn extract_selected_files(&mut self) {
         if let Some(vfs) = &self.vfs {
             let files_to_extract = ExtractionManager::get_selected_files(vfs, &self.selected_files);
-            
+
             self.pending_extraction = Some(files_to_extract);
             self.status_message = format!("Queued {} files for extraction", self.pending_extraction.as_ref().unwrap().len());
         }
     }
-    
+
     fn perform_search(&mut self) {
         if let Some(vfs) = &self.vfs {
             let query = self.search_query.to_lowercase();
             const MAX_RESULTS: usize = 1000;
 
-            self.search_results = vfs.list_all_files()
+            // Use parallel processing for large file lists
+            let all_files: Vec<String> = vfs.list_all_files()
                 .into_iter()
-                .filter(|f| f.to_lowercase().contains(&query))
-                .take(MAX_RESULTS)
                 .map(|s| s.to_string())
                 .collect();
+
+            if all_files.len() > 10000 {
+                // Parallel search for large datasets
+                let results: Vec<String> = all_files
+                    .par_iter()
+                    .filter(|f| f.to_lowercase().contains(&query))
+                    .map(|s| s.clone())
+                    .collect();
+                self.search_results = results.into_iter().take(MAX_RESULTS).collect();
+            } else {
+                // Sequential search for smaller datasets
+                self.search_results = all_files
+                    .into_iter()
+                    .filter(|f| f.to_lowercase().contains(&query))
+                    .take(MAX_RESULTS)
+                    .collect();
+            }
         }
     }
-    
+
     fn navigate_to_file(&mut self, file_path: &str) {
         if let Some(last_slash) = file_path.rfind('/') {
             self.current_dir = file_path[..last_slash].to_string();
@@ -456,7 +542,7 @@ impl BlcVfsApp {
             self.refresh_entries();
         }
     }
-    
+
     fn open_pck_view(&mut self, pck_path: &str) {
         if let Some(vfs) = &self.vfs {
             match vfs.read_file(pck_path) {
@@ -469,7 +555,7 @@ impl BlcVfsApp {
                                     blc_vfs::VFS::FileType::PCK::pck_extractor::PckEntryType::WemX => "WEM".to_string(),
                                     blc_vfs::VFS::FileType::PCK::pck_extractor::PckEntryType::Bnk => "BNK".to_string(),
                                     blc_vfs::VFS::FileType::PCK::pck_extractor::PckEntryType::Plg => "PLG".to_string(),
-                                    blc_vfs::VFS::FileType::PCK::pck_extractor::PckEntryType::Unknown => "BIN".to_string(),
+                                    blc_vfs::VFS::FileType::PCK::pck_extractor::PckEntryType::Unknown => "UNKNOWN".to_string(),
                                 };
                                 PckEntryView {
                                     file_id: e.file_id,
@@ -477,20 +563,19 @@ impl BlcVfsApp {
                                     size: e.data.len(),
                                 }
                             }).collect();
-                            
+
                             let parent_dir = if let Some(last_slash) = pck_path.rfind('/') {
                                 pck_path[..last_slash].to_string()
                             } else {
                                 String::new()
                             };
-                            
+
                             self.pck_view = Some(PckView {
                                 pck_path: pck_path.to_string(),
                                 entries,
                                 parent_dir,
                                 selected_entries: HashSet::new(),
                             });
-                            self.status_message = format!("✓ Opened PCK: {} ({} entries)", pck_path, result.entries.len());
                         }
                         Err(e) => {
                             self.status_message = format!("✗ Failed to parse PCK: {}", e);
@@ -503,37 +588,18 @@ impl BlcVfsApp {
             }
         }
     }
-    
-    fn show_packages(&self, ctx: &egui::Context) {
-        if let Some(vfs) = &self.vfs {
-            let packages: Vec<_> = vfs.list_packages().iter().map(|name| {
-                let count = vfs.get_package(name).map(|p| p.get_file_count()).unwrap_or(0);
-                (name.to_string(), count)
-            }).collect();
-            
-            let mut show = true;
-            egui::Window::new("Packages")
-                .open(&mut show)
-                .show(ctx, |ui| {
-                    for (name, count) in packages {
-                        ui.horizontal(|ui| {
-                            ui.label("📦");
-                            ui.label(&name);
-                            ui.label(format!("({} files)", count));
-                        });
-                    }
-                });
-        }
-    }
 }
 
 pub fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0])
-            .with_title("BLC Virtual File System"),
+            .with_inner_size([1024.0, 768.0]),
         ..Default::default()
     };
-    
-    eframe::run_native("BLC VFS", options, Box::new(|_cc| Ok(Box::new(BlcVfsApp::default()))))
+
+    eframe::run_native(
+        "BLC VFS Explorer",
+        options,
+        Box::new(|_cc| Ok(Box::new(BlcVfsApp::default()))),
+    )
 }

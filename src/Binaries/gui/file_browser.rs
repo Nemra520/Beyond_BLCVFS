@@ -10,6 +10,7 @@ pub struct FileBrowserResponse {
     pub extract_file: Option<String>,
     pub toggle_selection: Option<String>,
     pub open_pck: Option<String>,
+    pub selected_file: Option<String>,
 }
 
 impl FileBrowserUI {
@@ -24,6 +25,7 @@ impl FileBrowserUI {
             extract_file: None,
             toggle_selection: None,
             open_pck: None,
+            selected_file: None,
         };
 
         if entries.is_empty() {
@@ -63,18 +65,22 @@ impl FileBrowserUI {
                         let text = format!("{} {}", icon, entry.name);
 
                         let is_pck = entry.name.ends_with(".pck");
-                        let is_selected_file = selected_file.as_ref() == Some(&entry.full_path);
+                        let _is_selected_file = selected_file.as_ref() == Some(&entry.full_path);
 
-                        let selectable_response = ui.selectable_label(is_selected_file, &text);
-                        if selectable_response.double_clicked() {
+                        // Use a button for better click detection
+                        let button_response = ui.button(&text);
+                        if button_response.double_clicked() {
                             if entry.is_dir {
                                 response.new_dir = Some(entry.full_path.clone());
                             } else if is_pck {
                                 response.open_pck = Some(entry.full_path.clone());
                             }
-                        } else if selectable_response.clicked() {
+                        } else if button_response.clicked() {
                             if entry.is_dir {
                                 response.new_dir = Some(entry.full_path.clone());
+                            } else {
+                                // Select the file to show details
+                                response.selected_file = Some(entry.full_path.clone());
                             }
                         }
 
