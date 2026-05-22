@@ -1,6 +1,5 @@
 # BLC-VFS
-**Remember: Delete this repository within 24 hours. Use responsibly.**
-**BLC Virtual File System Implementation in Rust**
+**Remember: Delete this within 24 hours.**
 
 A high-performance tool for mounting and extracting game resource packages from Arknights: Endfield (BLC format).
 
