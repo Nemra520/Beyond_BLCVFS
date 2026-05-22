@@ -92,6 +92,7 @@ This project incorporates code and concepts from the following sources:
 | BLC | Main virtual file system container | ✅ Working |
 | PCK | Package files with Wwise audio | ✅ Working |
 | xLua | Encrypted Lua scripts (XXTEA) | ✅ Working |
+| bytes | Formated | ✅ Partial support |
 
 ## 🏗️ Architecture
 
