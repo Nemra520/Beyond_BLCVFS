@@ -78,7 +78,7 @@ This project incorporates code and concepts from the following sources:
 ### Unlicensed Sources:
 
 - **[FkArkEnd](https://github.com/shiikwi/FkArkEnd)** by shiikwi
-  - SparkBuffer parsing and decompression reference
+  - Binary parsing reference
   - **Note:** This repository has no explicit license; code used with attribution
 
 ---
@@ -119,7 +119,7 @@ This project incorporates code and concepts from the following sources:
 #### Video Formats
 | Format | Extension | Description | Status |
 |--------|-----------|-------------|--------|
-| USM | `.usm` | Criware Stream Media (video extraction) | ✅ Working |
+| USM | `.usm` | Cri Stream Media (video extraction) | ✅ Working |
 | M2V | `.m2v` | MPEG-2 video stream (extracted from USM) | ✅ Working |
 
 #### Data/Config Formats
