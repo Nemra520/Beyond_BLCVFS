@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 const TABLE_CFG_PACKAGE: &str = "42A8FCA6";
+const STRINGPATH_PACKAGES: &[&str] = &["3C9D9D2D", "D6E622F7"];
 
 pub struct ExtractionManager;
 
@@ -38,13 +39,23 @@ impl ExtractionManager {
         // Check if file is .hgmmap -> convert to JSON
         let is_hgmmap = file_path.to_lowercase().ends_with(".hgmmap");
 
-        let (output_path, write_data) = if is_bytes_in_target_pkg {
+        // Check if file is .bin in specific packages -> convert to JSON via PathBytesParser
+        let is_bin_in_target_pkg = file_path.to_lowercase().ends_with(".bin")
+            && vfs.get_file_package(file_path)
+                .map(|pkg| STRINGPATH_PACKAGES.iter().any(|&p| pkg.eq_ignore_ascii_case(p)))
+                .unwrap_or(false);
+
+        // Check if it's a compress bin (filename contains "compress")
+        let is_compress_bin = is_bin_in_target_pkg && file_path.to_lowercase().contains("compress");
+
+        if is_bytes_in_target_pkg {
             let json_str = blc_vfs::SparkBytesParser::parse_to_json(&data);
             let json_path = file_path.strip_suffix(".bytes")
                 .map(|s| format!("{}.json", s))
                 .unwrap_or_else(|| format!("{}.json", file_path));
             println!("[DEBUG] extract_file: converting .bytes to JSON for '{}'", file_path);
-            (output_dir.join(json_path), json_str.into_bytes())
+            let output_path = output_dir.join(json_path);
+            Self::write_file(&output_path, json_str.into_bytes())?;
         } else if is_hgmmap {
             let json_str = std::thread::scope(|s| {
                 s.spawn(|| blc_vfs::HgmmapParser::parse_to_json(&data)).join().unwrap_or_else(|_| "{\"error\": \"hgmmap parse thread panicked\"}".to_string())
@@ -53,11 +64,51 @@ impl ExtractionManager {
                 .map(|s| format!("{}.json", s))
                 .unwrap_or_else(|| format!("{}.json", file_path));
             println!("[DEBUG] extract_file: converting .hgmmap to JSON for '{}'", file_path);
-            (output_dir.join(json_path), json_str.into_bytes())
+            let output_path = output_dir.join(json_path);
+            Self::write_file(&output_path, json_str.into_bytes())?;
+        } else if is_compress_bin {
+            // Compress bin: create folder and extract multiple files
+            // Preserve full virtual path, just strip .bin extension for folder name
+            let folder_path = file_path.strip_suffix(".bin")
+                .map(|s| output_dir.join(s))
+                .unwrap_or_else(|| output_dir.join(file_path));
+            
+            std::fs::create_dir_all(&folder_path)
+                .map_err(|e| format!("Failed to create directory '{}': {}", folder_path.display(), e))?;
+            
+            println!("[DEBUG] extract_file: extracting compress bin '{}' to folder '{}'", file_path, folder_path.display());
+            
+            // Parse and extract entries
+            let entries = blc_vfs::PathBytesParser::parse_compress_entries(&data);
+            for entry in entries {
+                let entry_path = folder_path.join(&entry.filename);
+                Self::write_file(&entry_path, entry.data)?;
+                println!("[DEBUG] extract_file: wrote entry '{}'", entry_path.display());
+            }
+        } else if is_bin_in_target_pkg {
+            // Regular bin: single JSON output
+            let filename = std::path::Path::new(file_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let json_str = blc_vfs::PathBytesParser::parse_to_json(&data, &filename);
+            let json_path = file_path.strip_suffix(".bin")
+                .map(|s| format!("{}.json", s))
+                .unwrap_or_else(|| format!("{}.json", file_path));
+            println!("[DEBUG] extract_file: converting .bin to JSON for '{}'", file_path);
+            let output_path = output_dir.join(json_path);
+            Self::write_file(&output_path, json_str.into_bytes())?;
         } else {
-            (output_dir.join(file_path), data)
+            // Regular file: copy as-is
+            let output_path = output_dir.join(file_path);
+            Self::write_file(&output_path, data)?;
         };
 
+        println!("[DEBUG] extract_file: successfully extracted '{}'", file_path);
+        Ok(())
+    }
+
+    fn write_file(output_path: &std::path::Path, data: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
         println!("[DEBUG] extract_file: output path {:?}", output_path);
         
         if let Some(parent) = output_path.parent() {
@@ -65,18 +116,17 @@ impl ExtractionManager {
             std::fs::create_dir_all(parent)
                 .map_err(|e| {
                     println!("[DEBUG] extract_file: create_dir_all failed: {}", e);
-                    format!("Failed to create directory for '{}': {}", file_path, e)
+                    format!("Failed to create directory '{:?}': {}", parent, e)
                 })?;
         }
         
         println!("[DEBUG] extract_file: writing to {:?}", output_path);
-        std::fs::write(&output_path, write_data)
+        std::fs::write(output_path, data)
             .map_err(|e| {
                 println!("[DEBUG] extract_file: write failed: {}", e);
-                format!("Failed to write '{}': {}", file_path, e)
+                format!("Failed to write '{:?}': {}", output_path, e)
             })?;
         
-        println!("[DEBUG] extract_file: successfully extracted '{}'", file_path);
         Ok(())
     }
     

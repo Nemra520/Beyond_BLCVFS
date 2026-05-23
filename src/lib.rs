@@ -5,3 +5,4 @@ pub use VFS::LuaDecipher;
 pub use VFS::PckExtractor;
 pub use VFS::SparkBytesParser;
 pub use VFS::HgmmapParser;
+pub use VFS::PathBytesParser;
