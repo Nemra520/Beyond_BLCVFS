@@ -283,7 +283,7 @@ The GUI provides:
 - ✅ Support for multiple platforms (Windows, Android bundles)
 - ✅ Memory-efficient large file handling
 - ✅ **Partial .bytes file support**: TableCfg package (42A8FCA6) .bytes files → JSON
-- ✅ ExtendData .bin files (not yet supported)
+- ✅ ExtendData .bin files
 - ❌ Streaming .bytes files (not yet supported)
 
 ## 🔬 Technical Highlights
