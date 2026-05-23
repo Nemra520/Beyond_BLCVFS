@@ -98,6 +98,27 @@ impl ExtractionManager {
             println!("[DEBUG] extract_file: converting .bin to JSON for '{}'", file_path);
             let output_path = output_dir.join(json_path);
             Self::write_file(&output_path, json_str.into_bytes())?;
+        } else if file_path.to_lowercase().ends_with(".usm") {
+            // USM file: extract video (auto-detect format: IVF/VP9, MPEG-2, etc.)
+            if let Some(video_data) = blc_vfs::UsmExtractor::extract_video(&data) {
+                // Detect container format from header
+                let ext = if video_data.len() >= 4 && &video_data[0..4] == b"DKIF" {
+                    ".m2v"  // IVF container (VP9/VP8)
+                } else {
+                    ".adx"  // Default ADX container
+                };
+                let video_path = file_path.strip_suffix(".usm")
+                    .map(|s| format!("{}{}", s, ext))
+                    .unwrap_or_else(|| format!("{}{}", file_path, ext));
+                println!("[DEBUG] extract_file: extracting video from USM '{}' as {}", file_path, ext);
+                let output_path = output_dir.join(video_path);
+                Self::write_file(&output_path, video_data)?;
+            } else {
+                println!("[DEBUG] extract_file: no video found in USM '{}'", file_path);
+                // Copy as-is if extraction fails
+                let output_path = output_dir.join(file_path);
+                Self::write_file(&output_path, data)?;
+            }
         } else {
             // Regular file: copy as-is
             let output_path = output_dir.join(file_path);

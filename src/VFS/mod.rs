@@ -8,3 +8,4 @@ pub use FileType::PckExtractor;
 pub use FileType::SparkBytesParser;
 pub use FileType::HgmmapParser;
 pub use FileType::PathBytesParser;
+pub use FileType::UsmExtractor;

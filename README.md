@@ -71,6 +71,16 @@ This project incorporates code and concepts from the following sources:
   - Studio tools and utilities reference
   - Licensed under: **MIT License**
 
+- **[VGMToolbox](https://github.com/Manicsteiner/VGMToolbox/)** by Manicsteiner
+  - Criware USM video stream demuxing implementation
+  - Licensed under: **MIT License**
+
+### Unlicensed Sources:
+
+- **[FkArkEnd](https://github.com/shiikwi/FkArkEnd)** by shiikwi
+  - SparkBuffer parsing and decompression reference
+  - **Note:** This repository has no explicit license; code used with attribution
+
 ---
 
 ## 🚀 Features
@@ -87,12 +97,43 @@ This project incorporates code and concepts from the following sources:
 - **GUI (Graphical User Interface)**: Modern interface built with egui/eframe
 
 ### Supported Formats
-| Format | Description | Status |
-|--------|-------------|--------|
-| BLC | Main virtual file system container | ✅ Working |
-| PCK | Package files with Wwise audio | ✅ Working |
-| xLua | Encrypted Lua scripts (XXTEA) | ✅ Working |
-| bytes | Formated | ✅ Partial support |
+
+#### Core Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| BLC | `.blc` | Main virtual file system container | ✅ Working |
+| CHK | `.chk` | Chunk integrity verification files | ✅ Working |
+
+#### Audio Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| PCK | `.pck` | Wwise audio package files | ✅ Working |
+| WEM | `.wem` | Wwise encoded media (embedded in PCK) | ✅ Working |
+
+#### Script Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| xLua | `.lua` | Encrypted Lua scripts (XXTEA) | ✅ Working |
+| Lua | `.lua` | Decrypted Lua source code | ✅ Working |
+
+#### Video Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| USM | `.usm` | Criware Stream Media (video extraction) | ✅ Working |
+| M2V | `.m2v` | MPEG-2 video stream (extracted from USM) | ✅ Working |
+
+#### Data/Config Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| SparkBytes | `.bytes` | TableCfg package files | ✅ Working |
+| JSON | `.json` | Exported configuration data | ✅ Working |
+| PathBytes | `.bytes` | Path-based compressed data | ✅ Partial support |
+| HGMMap | `.hgmmap` | Map data files | ✅ Working |
+
+#### Binary Formats
+| Format | Extension | Description | Status |
+|--------|-----------|-------------|--------|
+| CompressData | `.bin` | Compressed data archives | ✅ Working |
 
 ## 🏗️ Architecture
 
@@ -130,9 +171,24 @@ src/
 │   │       ├── mod.rs      # xLua module root
 │   │       ├── lua_decipher.rs  # Lua decryption
 │   │       └── xxtea.rs        # XXTEA implementation
-│   └── sparkbytes/
-│   │       ├── mod.rs      # SparkBytes module root
-│   │       └── bytes_parser.rs  # .bytes file parser (TableCfg)
+│   ├── sparkbytes/
+│   │   ├── mod.rs          # SparkBytes module root
+│   │   ├── bytes_parser.rs # .bytes file parser (TableCfg)
+│   │   └── types.rs        # SparkBytes type definitions
+│   ├── pathbytes/
+│   │   ├── mod.rs          # PathBytes module root
+│   │   ├── parser.rs       # PathBytes parser
+│   │   ├── compress_parser.rs  # Compressed data parser
+│   │   ├── types.rs        # PathBytes type definitions
+│   │   └── json.rs         # JSON export utilities
+│   ├── hgmmap/
+│   │   ├── mod.rs          # HGMMap module root
+│   │   ├── hgmmap_parser.rs # HGMMap file parser
+│   │   ├── types.rs        # HGMMap type definitions
+│   │   └── json.rs         # JSON export utilities
+│   └── usm/
+│       ├── mod.rs          # USM module root
+│       └── parser.rs       # USM video stream extractor
 │   └── BLC/
 │       ├── mod.rs          # BLC module root
 │       ├── types.rs        # Data structures
@@ -227,8 +283,8 @@ The GUI provides:
 - ✅ Support for multiple platforms (Windows, Android bundles)
 - ✅ Memory-efficient large file handling
 - ✅ **Partial .bytes file support**: TableCfg package (42A8FCA6) .bytes files → JSON
-  - ❌ ExtendData .bin files (not yet supported)
-  - ❌ Streaming .bytes files (not yet supported)
+- ✅ ExtendData .bin files (not yet supported)
+- ❌ Streaming .bytes files (not yet supported)
 
 ## 🔬 Technical Highlights
 
