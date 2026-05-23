@@ -7,3 +7,4 @@ pub use VFS::SparkBytesParser;
 pub use VFS::HgmmapParser;
 pub use VFS::PathBytesParser;
 pub use VFS::UsmExtractor;
+pub use VFS::FileType::{ManifestParser, ManifestVFS, VirtualEntry};

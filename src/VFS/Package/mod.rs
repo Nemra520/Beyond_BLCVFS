@@ -140,6 +140,10 @@ impl Package {
         self.file_index.len()
     }
 
+    pub fn get_base_path(&self) -> &Path {
+        &self.base_path
+    }
+
     pub fn read_pck_file(&self, path: &str) -> Result<Vec<u8>> {
         let data = self.read_file(path)?;
         PckExtractor::get_decrypted_pck(&data)

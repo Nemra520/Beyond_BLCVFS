@@ -205,4 +205,11 @@ impl MultiVFS {
             .map(|(name, package)| (name.clone(), package.get_file_count()))
             .collect()
     }
+
+    /// Get the base path of the package containing a file
+    pub fn get_file_package_path(&self, file_path: &str) -> Option<&Path> {
+        let package_name = self.file_to_package.get(file_path)?;
+        let package = self.packages.get(package_name)?;
+        Some(package.get_base_path())
+    }
 }

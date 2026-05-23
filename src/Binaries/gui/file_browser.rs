@@ -11,6 +11,7 @@ pub struct FileBrowserResponse {
     pub toggle_selection: Option<String>,
     pub open_pck: Option<String>,
     pub selected_file: Option<String>,
+    pub view_manifest: Option<String>,
 }
 
 impl FileBrowserUI {
@@ -26,6 +27,7 @@ impl FileBrowserUI {
             toggle_selection: None,
             open_pck: None,
             selected_file: None,
+            view_manifest: None,
         };
 
         if entries.is_empty() {
@@ -65,6 +67,8 @@ impl FileBrowserUI {
                         let text = format!("{} {}", icon, entry.name);
 
                         let is_pck = entry.name.ends_with(".pck");
+                        let is_manifest = entry.name.to_lowercase().ends_with("manifest.json")
+                            || entry.name.to_lowercase().ends_with("manifest.hgmmap");
                         let _is_selected_file = selected_file.as_ref() == Some(&entry.full_path);
 
                         // Use a button for better click detection
@@ -74,10 +78,16 @@ impl FileBrowserUI {
                                 response.new_dir = Some(entry.full_path.clone());
                             } else if is_pck {
                                 response.open_pck = Some(entry.full_path.clone());
+                            } else if is_manifest {
+                                // 双击 manifest 文件打开虚拟目录视图
+                                response.view_manifest = Some(entry.full_path.clone());
                             }
                         } else if button_response.clicked() {
                             if entry.is_dir {
                                 response.new_dir = Some(entry.full_path.clone());
+                            } else if is_manifest {
+                                // 单击 manifest 文件也打开虚拟目录视图
+                                response.view_manifest = Some(entry.full_path.clone());
                             } else {
                                 // Select the file to show details
                                 response.selected_file = Some(entry.full_path.clone());
@@ -90,8 +100,20 @@ impl FileBrowserUI {
                                     response.open_pck = Some(entry.full_path.clone());
                                 }
                             }
-                            if ui.small_button("Extract").clicked() {
-                                response.extract_file = Some(entry.full_path.clone());
+                            if is_manifest {
+                                // manifest 文件显示 View 按钮（打开虚拟目录）
+                                if ui.small_button("View").clicked() {
+                                    response.view_manifest = Some(entry.full_path.clone());
+                                }
+                                // manifest 文件也显示 Extract 按钮（导出为 JSON）
+                                if ui.small_button("Extract").clicked() {
+                                    response.extract_file = Some(entry.full_path.clone());
+                                }
+                            } else {
+                                // 其他文件（包括 hgmmap）显示 Extract 按钮
+                                if ui.small_button("Extract").clicked() {
+                                    response.extract_file = Some(entry.full_path.clone());
+                                }
                             }
                         }
                     });
