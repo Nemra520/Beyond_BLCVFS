@@ -35,12 +35,24 @@ impl ExtractionManager {
                 .map(|pkg| pkg.eq_ignore_ascii_case(TABLE_CFG_PACKAGE))
                 .unwrap_or(false);
 
+        // Check if file is .hgmmap -> convert to JSON
+        let is_hgmmap = file_path.to_lowercase().ends_with(".hgmmap");
+
         let (output_path, write_data) = if is_bytes_in_target_pkg {
             let json_str = blc_vfs::SparkBytesParser::parse_to_json(&data);
             let json_path = file_path.strip_suffix(".bytes")
                 .map(|s| format!("{}.json", s))
                 .unwrap_or_else(|| format!("{}.json", file_path));
             println!("[DEBUG] extract_file: converting .bytes to JSON for '{}'", file_path);
+            (output_dir.join(json_path), json_str.into_bytes())
+        } else if is_hgmmap {
+            let json_str = std::thread::scope(|s| {
+                s.spawn(|| blc_vfs::HgmmapParser::parse_to_json(&data)).join().unwrap_or_else(|_| "{\"error\": \"hgmmap parse thread panicked\"}".to_string())
+            });
+            let json_path = file_path.strip_suffix(".hgmmap")
+                .map(|s| format!("{}.json", s))
+                .unwrap_or_else(|| format!("{}.json", file_path));
+            println!("[DEBUG] extract_file: converting .hgmmap to JSON for '{}'", file_path);
             (output_dir.join(json_path), json_str.into_bytes())
         } else {
             (output_dir.join(file_path), data)

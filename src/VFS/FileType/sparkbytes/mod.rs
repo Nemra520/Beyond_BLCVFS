@@ -1,3 +1,5 @@
+mod types;
 mod bytes_parser;
+mod json;
 
-pub use bytes_parser::SparkBytesParser;
+pub use json::SparkBytesParser;

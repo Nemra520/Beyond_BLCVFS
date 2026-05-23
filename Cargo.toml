@@ -21,6 +21,7 @@ memmap2 = "0.9"
 walkdir = "2.5"
 md-5 = "0.10"
 byteorder = "1.5"
+brotli-decompressor = "4.0"
 
 eframe = "0.29"
 egui = "0.29"

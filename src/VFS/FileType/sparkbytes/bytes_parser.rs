@@ -1,54 +1,9 @@
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
-struct EnumDef {
-    #[allow(dead_code)]
-    name: String,
-    members: HashMap<i32, String>,
-}
+use super::types::{EnumDef, FieldDef, RawSchema, ComputedField, ComputedSchema};
 
-#[derive(Clone, Debug)]
-struct FieldDef {
-    name: String,
-    f_type: u8,
-    inner_type: Option<u8>,
-    inner_hash: Option<[u8; 4]>,
-    key_type: Option<u8>,
-    val_type: Option<u8>,
-    val_hash: Option<[u8; 4]>,
-}
-
-#[derive(Clone, Debug)]
-struct RawSchema {
-    name: String,
-    fields: Vec<FieldDef>,
-}
-
-#[derive(Clone, Debug)]
-struct ComputedField {
-    name: String,
-    f_type: u8,
-    offset: usize,
-    inner_type: Option<u8>,
-    inner_hash: Option<[u8; 4]>,
-    key_type: Option<u8>,
-    val_type: Option<u8>,
-    val_hash: Option<[u8; 4]>,
-}
-
-#[derive(Clone, Debug)]
-struct ComputedSchema {
-    #[allow(dead_code)]
-    name: String,
-    fields: Vec<ComputedField>,
-    #[allow(dead_code)]
-    size: usize,
-    #[allow(dead_code)]
-    align: usize,
-}
-
-struct BytesParser {
+pub(super) struct BytesParser {
     raw_schemas: HashMap<[u8; 4], RawSchema>,
     enums: HashMap<[u8; 4], EnumDef>,
     schemas: HashMap<[u8; 4], ComputedSchema>,
@@ -232,7 +187,7 @@ impl BytesParser {
         Some(schema)
     }
 
-    fn parse_bytes_file(data: &[u8]) -> Value {
+    pub(super) fn parse_bytes_file(data: &[u8]) -> Value {
         let mut parser = Self::new();
         parser.parse_schemas_from_bytes(data);
         parser.compute_all_schemas();
@@ -792,15 +747,4 @@ fn field_type_size(f_type: u8) -> usize {
 
 fn hex_encode(bytes: &[u8; 4]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
-}
-
-/// SparkBytes .bytes 文件解析器
-pub struct SparkBytesParser;
-
-impl SparkBytesParser {
-    /// 解析 .bytes 文件数据并返回格式化的 JSON 字符串
-    pub fn parse_to_json(data: &[u8]) -> String {
-        let value = BytesParser::parse_bytes_file(data);
-        serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())
-    }
 }
